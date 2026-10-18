@@ -1,0 +1,19 @@
+ostf: "0.1"
+policy:
+  owners: [quality]
+  groups:
+    quality: ["@stperic"]
+  locks:
+    - {item: R-LIMIT, owners: [quality], reason: Review changes to the accepted limit.}
+    - {item: R-FIXED, mode: frozen, reason: Fixed for this trial.}
+items:
+  - id: R-LIMIT
+    text: Amounts up to 50 are allowed.
+    status: accepted
+    code: [limit.go#Allowed]
+    tests: [limit_test.go#TestAllowed]
+  - id: R-FIXED
+    text: The fixed value is 1.
+    status: accepted
+    code: [limit.go#FixedValue]
+    tests: [limit_test.go#TestFixedValue]

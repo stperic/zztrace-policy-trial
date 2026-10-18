@@ -1,0 +1,107 @@
+name: Trace policy trial
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to evaluate
+        type: string
+        required: false
+      create_trials:
+        description: Open the two prepared synthetic pull requests as the Actions bot
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  open-trials:
+    if: github.event_name == 'workflow_dispatch' && inputs.create_trials
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Open prepared trial branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          gh api --method POST "repos/$REPOSITORY/pulls" \
+            -f base=main -f head=trial/approval \
+            -f title='T3b trial: lower the reviewed limit to 40' \
+            -f body='Synthetic fixture. This changes the requirement, implementation, test and stamps together. The required policy check must fail until the owner approves this exact head.'
+          gh api --method POST "repos/$REPOSITORY/pulls" \
+            -f base=main -f head=trial/denied \
+            -f title='T3b trial: change a frozen function' \
+            -f body='Synthetic negative case. This changes code and a test covered by the frozen R-FIXED lock. Approval must not make the required policy check pass.'
+
+  policy:
+    if: github.event_name != 'workflow_dispatch' || inputs.pr != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    concurrency:
+      group: trace-policy-${{ github.event.pull_request.number || inputs.pr }}
+      cancel-in-progress: true
+    steps:
+      - name: Read PR coordinates and mark the check pending
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+        run: |
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" > "$RUNNER_TEMP/pr.json"
+          head=$(jq -er '.head.sha' "$RUNNER_TEMP/pr.json")
+          [[ "$head" =~ ^[0-9a-f]{40}$ ]]
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+          gh api --method POST "repos/$REPOSITORY/statuses/$head" \
+            -f state=pending -f context=zztrace/policy \
+            -f description='Evaluating trace policy and current reviews'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ steps.pr.outputs.head }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Load the pinned checker
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          gh release download checker-v1 --repo "$REPOSITORY" \
+            --pattern zztrace-trace-linux-amd64 --dir "$RUNNER_TEMP"
+          printf '%s  %s\n' '9e1dad5c23366f7a1282be7f83b0c47324472e2a3323a2e8935b957a7d4f4cdd' "$RUNNER_TEMP/zztrace-trace-linux-amd64" | sha256sum --check -
+          chmod +x "$RUNNER_TEMP/zztrace-trace-linux-amd64"
+      - name: Evaluate the committed graph and GitHub approvals
+        id: policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+        run: |
+          "$RUNNER_TEMP/zztrace-trace-linux-amd64" policy \
+            --github "$REPOSITORY" --pr "$PR_NUMBER" > "$RUNNER_TEMP/policy.json"
+      - name: Publish the required status
+        if: always() && steps.pr.outputs.head != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          HEAD_COMMIT: ${{ steps.pr.outputs.head }}
+          POLICY_OUTCOME: ${{ steps.policy.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          state=failure
+          if [ "$POLICY_OUTCOME" = success ]; then state=success; fi
+          if [ -f "$RUNNER_TEMP/policy.json" ]; then cat "$RUNNER_TEMP/policy.json"; fi
+          gh api --method POST "repos/$REPOSITORY/statuses/$HEAD_COMMIT" \
+            -f "state=$state" -f context=zztrace/policy \
+            -f description='Trace policy and committed graph check' -f "target_url=$RUN_URL"
