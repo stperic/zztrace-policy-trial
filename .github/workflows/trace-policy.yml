@@ -85,6 +85,7 @@ jobs:
       - name: Evaluate the committed graph and GitHub approvals
         id: policy
         env:
+          CI: ${{ vars.ZZTRACE_REQUIRED_CHECK || 'false' }}
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
