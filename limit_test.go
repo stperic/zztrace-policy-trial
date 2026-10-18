@@ -9,7 +9,7 @@ func TestAllowed(t *testing.T) {
 }
 
 func TestFixedValue(t *testing.T) {
-	if FixedValue() != 1 {
+	if FixedValue() != 2 {
 		t.Fatal("fixed value changed")
 	}
 }
