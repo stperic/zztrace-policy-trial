@@ -25,6 +25,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.create_trials
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pull-requests: write
     steps:
       - name: Open prepared trial branches
