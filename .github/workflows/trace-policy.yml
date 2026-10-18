@@ -25,6 +25,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.create_trials
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pull-requests: write
     steps:
       - name: Open prepared trial branches
@@ -84,6 +85,7 @@ jobs:
       - name: Evaluate the committed graph and GitHub approvals
         id: policy
         env:
+          CI: ${{ vars.ZZTRACE_REQUIRED_CHECK || 'false' }}
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
